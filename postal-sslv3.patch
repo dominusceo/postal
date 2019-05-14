@@ -1,0 +1,231 @@
+--- postal-0.73/basictcp.cpp	2012-01-01 05:36:27.000000000 -0600
++++ postal-0.73_bueno/basictcp.cpp	2019-05-13 13:02:43.205809805 -0500
+@@ -102,10 +102,27 @@
+   m_sslMeth = NULL;
+   m_sslCtx = NULL;
+   m_ssl = NULL;
+-  m_sslMeth = SSLv2_client_method();
++#ifndef OPENSSL_NO_SSL2
++  SSL_METHOD const *m_sslMeth = SSLv2_client_method();
++#else
++#ifndef OPENSSL_NO_SSL3
++  SSL_METHOD const *m_sslMeth = SSLv3_client_method();
++#else
++  SSL_METHOD const *m_sslMeth = SSLv23_client_method();
++#endif
++#endif
++
+   if(m_sslMeth == NULL)
+   {
++#ifndef OPENSSL_NO_SSL2
+     fprintf(stderr, "Can't get SSLv2_client_method.\n");
++#else
++#ifndef OPENSSL_NO_SSL3
++    fprintf(stderr, "Can't get SSLv3_client_method.\n");
++#else
++    fprintf(stderr, "Can't get SSLv23_client_method.\n");
++#endif
++#endif
+     return 2;
+   }
+   m_sslCtx = SSL_CTX_new(m_sslMeth);
+--- postal-0.73/Makefile	2012-01-02 01:40:44.000000000 -0600
++++ postal-0.73_bueno/Makefile	2019-05-13 13:04:27.599815004 -0500
+@@ -5,7 +5,7 @@
+ 
+ all: $(EXE) $(SEXE)
+ 
+-prefix=/home/rjc/postal/postal-0.72/debian/postal/usr
++prefix=/usr/local
+ eprefix=${prefix}
+ WFLAGS=-Wall -W -Wshadow -Wpointer-arith -Wcast-align -Wwrite-strings -Wcast-qual -pedantic
+ WPLUS=-Woverloaded-virtual -ffor-scope
+@@ -16,9 +16,9 @@
+ INSTALL=/usr/bin/install -c
+ 
+ TESTEXE=ex-test
+-BASEOBJS=userlist.o thread.o results.o address.o tcp.o cmd5.o mutex.o logit.o expand.o md5.o
++BASEOBJS=userlist.o thread.o results.o address.o tcp.o cmd5.o mutex.o logit.o expand.o 
+ LFLAGS=-lstdc++  -lpthread
+-CRYPTLFLAGS=-lstdc++  -lpthread -lgnutls -lgcrypt
++CRYPTLFLAGS=-lstdc++  -lpthread -lssl -lcrypto
+ 
+ 
+ ALLOBJS=$(BASEOBJS) smtp.o client.o basictcp.o bhmusers.o smtpserver.o
+--- postal-0.73/postal.h	2012-01-02 01:40:44.000000000 -0600
++++ postal-0.73_bueno/postal.h	2019-05-13 13:07:51.280825148 -0500
+@@ -8,9 +8,9 @@
+   eNONE
+ } TRISTATE;
+ 
+-#define VER_STR "0.72"
++#define VER_STR "0.73"
++#define USE_OPENSSL
+ 
+-#define USE_GNUTLS
+ #ifdef USE_GNUTLS
+ #define GNUTLS_VER "1.4.4"
+ #define USE_SSL
+--- postal-0.73/postal.spec	2012-01-02 01:40:44.000000000 -0600
++++ postal-0.73_bueno/postal.spec	2019-05-14 15:49:40.840611694 -0500
+@@ -1,45 +1,80 @@
++######################################################################
++# @source: https://cromwell-intl.com/open-source/rpm-patch.html 
++# Every spec file must start with an unlabeled block defining:
++# Summary       = One-line summary, details go in %description
++# Name          = Package name
++# Version       = As numbered by original authors
++# Release       = Our release, maybe we change our mind and rebuild with
++#                 a larger number.  When we build the binary package it
++#                 will be in a file name-version-release-architecture.rpm.
++#                 and "rpm -q" will report "name-version-release".
++# Group         = One of the categories in /usr/share/doc/rpm/GROUPS
++# License       = GPL, GPL+, BSD, MIT, etc
++# URL           = Home page of project, will be reported in "rpm -qi"
++# Source*       = Where to get the reference copy of the source code.
++#                 The file name component of the URL must agree with the
++#                 tar file stored in SOURCES.  Simply "Source" is there
++#                 is just one, "Source0", "Source1", etc if there are more.
++# Patch*        = Our patch files.  Again just "Patch" if there is one,
++#                 "Patch0", "Patch1", etc if there are more.
++# BuildRequires = Packages, typically *-devel, needed to compile
++# Requires      = Packages needed before installing
++######################################################################
+ Summary: A program for benchmarking mail servers
+ Name: postal
+-Version: 0.72
++Version: 0.73
+ Release: 1
+ License: GPL
+ Group: Utilities/Benchmarking
+-Source: http://www.coker.com.au/postal/postal_%{version}.tar.gz 
++Source: http://www.coker.com.au/postal/postal-%{version}.tar.gz 
++Patch:    postal-sslv3.patch
+ BuildRoot: /tmp/%{name}-buildroot
++Packager: Ricardo David Carrillo Sanchez <dominus.ceo@gmail.com>
++
+ 
+ %description
+ The Postal suite consists of an SMTP delivery benchmark (postal), a POP
+ retrieval benchmark (rabid) and other programs soon to be added.
+ 
+ %prep
+-%setup -q
++%setup -q %{name}-%{version}
++%patch -p1
+ 
+ %build
+-./configure --prefix=${RPM_BUILD_ROOT}
+-make 
+-
++./configure --prefix=${RPM_BUILD_ROOT} && make 
++DESTDIR=${RPM_BUILD_ROOT} make install
+ %install
+ rm -rf $RPM_BUILD_ROOT
+-DESTDIR=${RPM_BUILD_ROOT} make install
+-install -d ${RPM_BUILD_ROOT}/usr/share/man/man8
+-install -d ${RPM_BUILD_ROOT}/usr/share/man/man1
+-install -m 644 *.8 $RPM_BUILD_ROOT/usr/share/man/man8
+-install -m 644 *.1 $RPM_BUILD_ROOT/usr/share/man/man1
++install -d %{buildroot}/usr/share/man/man8
++install -d %{buildroot}/usr/share/man/man1
++install -d %{buildroot}/sbin
++install -d %{buildroot}/bin
++install -m 755 postal %{buildroot}/sbin
++install -m 755 rabid  %{buildroot}/sbin
++install -m 755 bhm %{buildroot}/sbin
++install -m 755 postal-list %{buildroot}/bin
++install -m 644 *.8 %{buildroot}/usr/share/man/man8
++install -m 644 *.1 %{buildroot}/usr/share/man/man1
+ 
+ %clean
+ rm -rf $RPM_BUILD_ROOT
+ 
+ %files
+ %defattr(-,root,root)
+-%doc changelog.txt readme.html
+-
+-/usr/sbin/postal
+-/usr/sbin/postal-list
+-/usr/sbin/rabid
+-/usr/share/man/man8/postal.8
+-/usr/share/man/man8/postal-list.8
+-/usr/share/man/man8/rabid.8
++#%doc readme.html
++/sbin/bhm
++/sbin/rabid
++/sbin/postal
++/bin/postal-list
++/usr/share/man/man1/postal-list.1.gz
++/usr/share/man/man8/postal.8.gz
++/usr/share/man/man8/rabid.8.gz
++/usr/share/man/man8/bhm.8.gz
+ 
+ %changelog
++* Sun May 12 2019 Ricardo Carrillo  <ricardo.carrillo@ine.mx> - <dominus.ceo@gmail.com>
++- Adding support for SSLv3 benchmarks, adding SSLv2_client_method, SSLv3_client_method, and SSLv23_client_method
++- Change data type of m_bytes variable  to ansigned long m_bytes;
++- Change version reference from 0.72 to 0.73
+ * Mon Feb 19 2001 Russell Coker <russell@coker.com.au>
+ - first packaging
+--- postal-0.73/results.h	2012-01-01 05:10:18.000000000 -0600
++++ postal-0.73_bueno/results.h	2019-05-13 13:28:55.052888088 -0500
+@@ -33,7 +33,7 @@
+ private:
+ 
+   unsigned int m_msgs;
+-  unsigned long long m_bytes;
++  unsigned long m_bytes;
+   unsigned int m_errors;
+ };
+ 
+diff -Naur postal-0.73/sun/pkginfo postal-0.73_bueno/sun/pkginfo
+--- postal-0.73/sun/pkginfo	2012-01-02 01:40:44.000000000 -0600
++++ postal-0.73_bueno/sun/pkginfo	2019-05-13 13:21:05.082864682 -0500
+@@ -1,6 +1,6 @@
+ PKG=postal
+ ARCH=sparc
+-VERSION=0.72
++VERSION=0.73
+ CATEGORY=application
+ NAME=Postal
+ DESC=Mail server benchmark suite
+--- postal-0.73/tcp.cpp	2012-01-01 05:24:45.000000000 -0600
++++ postal-0.73_bueno/tcp.cpp	2019-05-13 13:06:00.752819644 -0500
+@@ -178,10 +178,23 @@
+ #ifdef USE_OPENSSL
+   m_sslCtx = NULL;
+   m_ssl = NULL;
++#ifndef OPENSSL_NO_SSL2
+   m_sslMeth = SSLv2_client_method();
++#else
++#ifndef OPENSSL_NO_SSL3
++  m_sslMeth = SSLv3_client_method();
++#else
++  m_sslMeth = SSLv23_client_method();
++#endif
++#endif
++
+   if(m_sslMeth == NULL)
+   {
+-    fprintf(stderr, "Can't get SSLv2_client_method.\n");
++#ifndef OPENSSL_NO_SSL3
++    fprintf(stderr, "Can't get SSLv3_client_method.\n");
++#else
++    fprintf(stderr, "Can't get SSLv23_client_method.\n");
++#endif
+     error();
+     return 2;
+   }
+--- postal-0.73/tcp.h	2007-01-12 01:12:10.000000000 -0600
++++ postal-0.73_bueno/tcp.h	2019-05-13 13:03:19.263811601 -0500
+@@ -100,7 +100,8 @@
+ 
+ #ifdef USE_SSL
+ #ifdef USE_OPENSSL
+-  SSL_METHOD *m_sslMeth;
++  const SSL_METHOD* ssl_method;
++  const SSL_METHOD* m_sslMeth;
+   SSL_CTX* m_sslCtx;
+   SSL *m_ssl;
+ #else

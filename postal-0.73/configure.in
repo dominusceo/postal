@@ -1,0 +1,147 @@
+dnl Process this file with autoconf to produce a configure script.
+AC_INIT(postal.cpp)
+AC_CONFIG_HEADER(conf.h)
+AC_SUBST(version)
+version="0.72"
+
+AC_ARG_ENABLE(stripping,
+      [  --disable-stripping  disables stripping of installed binaries],
+      STRIPPING=$strippingval, STRIPPING=no)
+AC_SUBST(stripping)
+if [[ ! "$STRIPPING" = "no" ]]; then
+  stripping=""
+else
+  stripping="-s"
+fi
+
+AC_ARG_ENABLE(openssl,
+      [  --disable-openssl  disables openssl support],
+      DISABLEOPENSSL=$opensslval, DISABLEOPENSSL=no)
+AC_ARG_ENABLE(gnutls,
+      [  --disable-gnutls  disables gnutls support],
+      DISABLEGNUTLS=$gnutlsval, DISABLEGNUTLS=no)
+
+dnl Checks for programs.
+AC_LANG_CPLUSPLUS
+AC_PROG_CC
+AC_PROG_CXX
+AC_PROG_CXXCPP
+AC_PROG_INSTALL
+
+dnl Checks for typedefs, structures, and compiler characteristics.
+AC_C_CONST
+AC_TYPE_SIZE_T
+
+AC_SUBST(semun)
+AC_TRY_COMPILE(#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+    , union semun sem; , semun="yes")
+if [[ -n "$semun" ]]; then
+   semun="#define SEMUN_IN_SEM_H"
+fi
+
+AC_SUBST(bool)
+AC_TRY_COMPILE([], [bool var;] , , bool="typedef bool char;")
+AC_SUBST(true_false)
+AC_TRY_COMPILE(, [char c = true; char d = false;
+] , true_false="0", true_false="1")
+AC_SUBST(snprintf)
+AC_TRY_LINK([#include <stdio.h>], char buf[[10]]; snprintf(buf, sizeof(buf), "abc");,,snprintf="no");
+if [[ -n "$snprintf" ]]; then
+   snprintf="#define NO_SNPRINTF"
+fi
+
+AC_SUBST(extra_ldflags)
+extra_ldflags=
+AC_ARG_WITH(extra-libs, [  --with-extra-libs=DIR   adds non standard library paths],
+  use_extra_libs=$withval,
+  use_extra_libs=NONE
+)
+if test -n "$use_extra_libs" && \
+   test "$use_extra_libs" != "NONE"; then
+ 
+   ac_save_ifs=$IFS
+   IFS=':'
+   for dir in $use_extra_libs; do
+     extra_ldflags="$extra_ldflags -L$dir"
+   done
+   IFS=$ac_save_ifs
+fi
+
+extra_ldflags=`/usr/bin/uname -a | grep -q SunOS && echo -lrt`
+
+dnl Checks for library -l socket.
+AC_CHECK_LIB(socket, bind, extra_ldflags="$extra_ldflags -lsocket -lnsl")
+
+dnl Checks for header files.
+AC_SUBST(gnutls)
+AC_SUBST(openssl)
+AC_SUBST(extra_objs)
+if [[ "$DISABLEGNUTLS" = "no" ]]; then
+  AC_CHECK_HEADER(gnutls/gnutls.h, GNUTLS=yes, GNUTLS=no)
+else
+  GNUTLS=no
+fi
+if [[ "$GNUTLS" = "yes" ]]; then
+  DISABLEOPENSSL=yes
+fi
+if [[ "$DISABLEOPENSSL" = "no" ]]; then
+  AC_CHECK_HEADER(openssl/crypto.h, OPENSSL=yes, OPENSSL=no)
+else
+  OPENSSL=no
+fi
+if [[ "$OPENSSL" = "no" ]]; then
+  extra_objs="md5.o"
+fi
+
+AC_SUBST(linux_pthread)
+AC_TRY_COMPILE([#define _GNU_SOURCE
+#include <pthread.h>
+] , [pthread_mutexattr_t attr;
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE_NP);]
+  , linux_pthread="yes")
+if [[ -n "$linux_pthread" ]]; then
+   linux_pthread="#define LINUX_PTHREAD"
+fi
+
+LDFLAGS=-lpthread
+AC_TRY_LINK([#include <pthread.h>
+void * thread_func(void * param) { return NULL; }
+] , [pthread_t thread_info;
+     pthread_attr_t attr;
+     pthread_create(&thread_info, &attr, &thread_func, NULL);]
+  , extra_ldflags="$extra_ldflags -lpthread"
+  , extra_ldflags="$extra_ldflags -pthread")
+
+AC_SUBST(crypt_ldflags)
+crypt_ldflags="$extra_ldflags"
+if [[ "$GNUTLS" = "no" ]]; then
+  gnutls=""
+else
+  gnutls="#define USE_GNUTLS"
+  crypt_ldflags="$extra_ldflags -lgnutls -lgcrypt"
+fi
+if [[ "$OPENSSL" = "no" ]]; then
+  openssl=""
+else
+  openssl="#define USE_OPENSSL"
+  crypt_ldflags="$extra_ldflags -lssl -lcrypto"
+fi
+
+AC_SUBST(large_file)
+large_file=""
+
+AC_SUBST(socklen_t)
+AC_TRY_COMPILE([#include <sys/types.h>
+#include <sys/socket.h>
+] , [socklen_t * namelen;], , no_socklen_t="true")
+if [[ -n "$no_socklen_t" ]]; then
+  socklen_t="#define socklen_t int"
+fi
+
+AC_CHECK_HEADERS(vector ext/hash_map)
+
+dnl Checks for library functions.
+
+AC_OUTPUT(Makefile postal.h port.h postal.spec sun/pkginfo)
